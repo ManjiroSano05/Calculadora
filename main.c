@@ -7,6 +7,7 @@
 #define MAX_MATRIZES 10
 #define MAX_DIMENSAO 10
 #define TAM_ENTRADA 128
+#define EPSILON 1e-12
 
 typedef struct {
     int linhas;
@@ -102,7 +103,7 @@ void informar_matrizes(Matriz matrizes[], int quantidade) {
     }
 }
 
-/* Soma (operacao 1) ou subtracao (operacoes 2 e 4). */
+/* Soma (operacao 1) ou subtracao (operacao 2). */
 int somar_ou_subtrair(const Matriz matrizes[], int quantidade,
                      int subtrair, Matriz *resultado) {
     int k, i, j;
@@ -161,6 +162,121 @@ int multiplicar(const Matriz matrizes[], int quantidade, Matriz *resultado) {
     return 1;
 }
 
+/* Encontra a inversa usando Gauss-Jordan com pivoteamento parcial.
+   Retorna 0 quando a matriz nao e quadrada ou nao e inversivel. */
+int inverter_matriz(const Matriz *matriz, Matriz *inversa) {
+    double aumentada[MAX_DIMENSAO][2 * MAX_DIMENSAO] = {{0}};
+    double escala = 0.0;
+    int n, i, j, k, linha_pivo;
+
+    if (matriz->linhas != matriz->colunas) {
+        return 0;
+    }
+    n = matriz->linhas;
+
+    for (i = 0; i < n; i++) {
+        for (j = 0; j < n; j++) {
+            aumentada[i][j] = matriz->valores[i][j];
+            if (fabs(aumentada[i][j]) > escala) {
+                escala = fabs(aumentada[i][j]);
+            }
+        }
+        aumentada[i][n + i] = 1.0;
+    }
+    if (escala == 0.0) {
+        return 0;
+    }
+
+    for (k = 0; k < n; k++) {
+        double maior = fabs(aumentada[k][k]);
+        double pivo;
+        linha_pivo = k;
+
+        for (i = k + 1; i < n; i++) {
+            double valor = fabs(aumentada[i][k]);
+            if (valor > maior) {
+                maior = valor;
+                linha_pivo = i;
+            }
+        }
+        /* Pivos muito proximos de zero sinalizam matriz singular. */
+        if (maior <= EPSILON * escala) {
+            return 0;
+        }
+        if (linha_pivo != k) {
+            for (j = 0; j < 2 * n; j++) {
+                double troca = aumentada[k][j];
+                aumentada[k][j] = aumentada[linha_pivo][j];
+                aumentada[linha_pivo][j] = troca;
+            }
+        }
+
+        pivo = aumentada[k][k];
+        for (j = 0; j < 2 * n; j++) {
+            aumentada[k][j] /= pivo;
+        }
+        for (i = 0; i < n; i++) {
+            if (i != k) {
+                double fator = aumentada[i][k];
+                for (j = 0; j < 2 * n; j++) {
+                    aumentada[i][j] -= fator * aumentada[k][j];
+                }
+            }
+        }
+    }
+
+    *inversa = (Matriz){0};
+    inversa->linhas = n;
+    inversa->colunas = n;
+    for (i = 0; i < n; i++) {
+        for (j = 0; j < n; j++) {
+            inversa->valores[i][j] = aumentada[i][n + j];
+            if (!isfinite(inversa->valores[i][j])) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+/* Divisao sequencial: ((A x B^-1) x C^-1) ... */
+int dividir_matrizes(const Matriz matrizes[], int quantidade, Matriz *resultado) {
+    Matriz inversa, produto;
+    int etapa, i, j, k;
+
+    *resultado = matrizes[0];
+    for (etapa = 1; etapa < quantidade; etapa++) {
+        if (matrizes[etapa].linhas != matrizes[etapa].colunas) {
+            printf("Erro: a matriz divisora %d nao e quadrada.\n", etapa + 1);
+            return 0;
+        }
+        if (resultado->colunas != matrizes[etapa].linhas) {
+            printf("Erro: dimensoes incompativeis na divisao pela matriz %d.\n",
+                   etapa + 1);
+            return 0;
+        }
+        if (!inverter_matriz(&matrizes[etapa], &inversa)) {
+            printf("Erro: a matriz divisora %d e singular (sem inversa).\n",
+                   etapa + 1);
+            return 0;
+        }
+
+        produto = (Matriz){0};
+        produto.linhas = resultado->linhas;
+        produto.colunas = inversa.colunas;
+        for (i = 0; i < produto.linhas; i++) {
+            for (j = 0; j < produto.colunas; j++) {
+                for (k = 0; k < resultado->colunas; k++) {
+                    produto.valores[i][j] +=
+                        resultado->valores[i][k] * inversa.valores[k][j];
+                }
+            }
+        }
+        *resultado = produto;
+    }
+    return 1;
+}
+
 void mostrar_menu(void) {
     puts("\n========== CALCULADORA DE MATRIZES ==========");
     puts("1 - Escolher quantidade de matrizes");
@@ -172,11 +288,11 @@ void mostrar_menu(void) {
 }
 
 void mostrar_operacoes(void) {
-    puts("\n--- OPERACOES (conforme o enunciado) ---");
+    puts("\n--- OPERACOES ---");
     puts("1 - Soma de matrizes");
     puts("2 - Subtracao de matrizes");
     puts("3 - Multiplicacao de matrizes");
-    puts("4 - Subtracao de matrizes (repetida no enunciado)");
+    puts("4 - Divisao matricial");
     puts("0 - Voltar ao menu principal");
 }
 
@@ -232,10 +348,12 @@ int main(void) {
                 tem_resultado = 0;
                 if (operacao == 1) {
                     sucesso = somar_ou_subtrair(matrizes, quantidade, 0, &resultado);
-                } else if (operacao == 2 || operacao == 4) {
+                } else if (operacao == 2) {
                     sucesso = somar_ou_subtrair(matrizes, quantidade, 1, &resultado);
-                } else {
+                } else if (operacao == 3) {
                     sucesso = multiplicar(matrizes, quantidade, &resultado);
+                } else {
+                    sucesso = dividir_matrizes(matrizes, quantidade, &resultado);
                 }
 
                 if (sucesso) {
